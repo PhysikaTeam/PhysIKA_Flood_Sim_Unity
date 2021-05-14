@@ -1,0 +1,5 @@
+Assets/Materials/initialState/shanghai/4096/shanghaiLatest2.0.fbx filter=lfs diff=lfs merge=lfs -text
+Assets/Materials/initialState/shanghai/8192/terrain.tiff filter=lfs diff=lfs merge=lfs -text
+Assets/Materials/initialState/shanghai/8192/waterSource.tiff filter=lfs diff=lfs merge=lfs -text
+Assets/shanghai_10311706.fbx filter=lfs diff=lfs merge=lfs -text
+Assets/sh000.fbx filter=lfs diff=lfs merge=lfs -text

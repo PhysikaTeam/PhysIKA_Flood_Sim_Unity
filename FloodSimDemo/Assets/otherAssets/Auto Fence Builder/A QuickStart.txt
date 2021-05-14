@@ -1,0 +1,21 @@
+Auto Fence Builder 1.0.1
+
+Load Demo Scene ( or create your a new one with either a terrain or a plane to act as the ground)
+
+Add Auto Fence Builder from the Game Object menu, or press shift-alt-F.
+
+Shift-click 2 or 3 times in the scene view (in editor mode). You should now see your fence.
+
+Select any style of fence from 'Choose Preset' popupmenu.
+
+If you have placed the fence on uneven ground, and use a Panel rail, switch 'Slope Mode' to 'Sheared'
+
+You can now adjust any of the parameters of the fence, such as 'Fence Height'
+
+For better viual quality, enable Anti-Aliasing in the Edit Menu/Project Settings/Quality
+
+See the manual for more details.
+
+twoclicktools@gmail.com
+
+Happy Fencing!

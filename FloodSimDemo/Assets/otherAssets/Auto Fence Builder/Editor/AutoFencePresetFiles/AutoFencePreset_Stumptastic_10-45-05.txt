@@ -1,0 +1,1 @@
+StumptasticWoodLog_PostTwoPlusOne_Panel_RailWoodLog_Post0.6200.000(2.500, 1.000, 2.500)(0.000, 90.000, 0.000)00.683(0.000, 0.300, 0.000)(1.000, 1.500, 1.000)(0.000, 0.000, 0.000)True14.950(0.000, 0.200, 0.000)(2.500, 0.820, 2.500)(0.000, 90.000, 0.000)True9.0000.0401.571FalseFalse4True0.0002True0.1820.0000.770OldWoodClassicRoadsideBoxOldWood

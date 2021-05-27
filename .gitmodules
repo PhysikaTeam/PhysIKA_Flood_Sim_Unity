@@ -1,0 +1,3 @@
+[submodule "GenPhysIKADll/PhysIKA"]
+	path = GenPhysIKADll/PhysIKA
+	url = https://github.com/PhysikaTeam/PhysIKA.git

@@ -1,0 +1,74 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 6
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_Name: prop_battleBus_lights_mat
+  m_Shader: {fileID: 4, guid: 0000000000000000f000000000000000, type: 0}
+  m_ShaderKeywords: V_WIRE_DYNAMIC_MASK_OFF V_WIRE_LIGHT_OFF
+  m_LightmapFlags: 5
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: 2000
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _BumpMap:
+        m_Texture: {fileID: 2800000, guid: 237f40384ce5c5746b3930cc4fd6f1f2, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DiffCubeIBL:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MainTex:
+        m_Texture: {fileID: 2800000, guid: 7f5264abfa2c3214d8143cdf42ae780b, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SpecCubeIBL:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SpecTex:
+        m_Texture: {fileID: 2800000, guid: d8dc85b833f805f4789788b737d0af6f, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _V_WIRE_TransparentTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Floats:
+    - V_WIRE_IncludeLightEnumID: 0
+    - V_WIRE_M_OPTIONS: 0
+    - V_WIRE_TAG: 0
+    - V_WIRE_V_OPTIONS: 0
+    - V_WIRE_W_OPTIONS: 0
+    - _Fresnel: 0.47761193
+    - _Shininess: 0.07324834
+    - _SpecInt: 1
+    - _V_WIRE_DynamicMaskEffectsBaseTexEnumID: 0
+    - _V_WIRE_DynamicMaskEffectsBaseTexInvert: 0
+    - _V_WIRE_DynamicMaskEnumID: 0
+    - _V_WIRE_DynamicMaskInvert: 0
+    - _V_WIRE_FresnelBias: 0
+    - _V_WIRE_FresnelEnumID: 0
+    - _V_WIRE_FresnelInvert: 0
+    - _V_WIRE_FresnelPow: 1
+    - _V_WIRE_LightEnumID: 0
+    - _V_WIRE_LightIntensity: 1
+    - _V_WIRE_Size: 0.05
+    - _V_WIRE_TransparencyEnumID: 0
+    - _V_WIRE_TransparentTex_Invert: 0
+    - _V_WIRE_TransparentTex_UVSet: 0
+    - _V_WIRE_VertexColorEnumID: 0
+    m_Colors:
+    - _Color: {r: 1, g: 1, b: 1, a: 1}
+    - _SpecColor: {r: 0.71323526, g: 0.71323526, b: 0.71323526, a: 1}
+    - _V_WIRE_Color: {r: 0.08499137, g: 0.6361649, b: 0.816, a: 0.14}
+    - _V_WIRE_MainTex_Scroll: {r: 0, g: 0, b: 0, a: 0}
+    - _V_WIRE_TransparentTex_Scroll: {r: 0, g: 0, b: 0, a: 0}

@@ -1,0 +1,1079 @@
+﻿// List of all separate kernels to be dispatched from CustomTerrain.cs
+#pragma kernel Edit
+#pragma kernel RainAndControl
+#pragma kernel FluxComputation
+//#pragma kernel FluxEdgeComputation
+#pragma kernel FluxApply
+#pragma kernel ComputeBuildingColor
+#pragma kernel HydraulicErosion
+#pragma kernel SedimentAdvection
+#pragma kernel ThermalErosion
+#pragma kernel ApplyThermalErosion
+
+
+#pragma kernel advect
+#pragma kernel copy
+#pragma kernel updateHeight
+#pragma kernel updateHeightImplicit
+#pragma kernel updateVelocity
+#pragma kernel copy2
+
+#pragma kernel CSMain
+// Number of threads in each kernel
+#define NUMTHREADS numthreads(8, 8, 1)
+
+// Directional maps channel semantics
+// It means that for textures with 4-directional data (like flux)
+// value for the each direction stored in a separate channel
+// For example, LEFT is stored in RED channel
+#define LDIR(col) (col.r)
+#define RDIR(col) (col.g)
+#define TDIR(col) (col.b)
+#define BDIR(col) (col.a)
+
+// State channel semantics
+#define TERRAIN_HEIGHT(col) (col.r)
+#define WATER_HEIGHT(col) (col.g)
+#define SEDIMENT(col) (col.b)
+#define HARDNESS(col) (col.a)
+#define FULL_HEIGHT(col) ((TERRAIN_HEIGHT(col) + WATER_HEIGHT(col)))
+#define Vx(col) (col.b)
+#define Vy(col) (col.a)
+#define V(col) (col.ba)
+
+
+// Velocity-map channel semantics
+#define VELOCITY_X(col) (col.r)
+#define VELOCITY_Y(col) (col.g)
+
+// Sampling macro, just to simplify the code a bit
+#define SAMPLE_WITH_OFFSET(tex, x, y) ((tex[id.xy + uint2(x, y)]))
+#define CURRENT_SAMPLE(tex) (tex[id.xy])
+#define LEFT_SAMPLE(tex) (SAMPLE_WITH_OFFSET(tex, -1, 0))
+#define RIGHT_SAMPLE(tex) (SAMPLE_WITH_OFFSET(tex, 1, 0))
+#define TOP_SAMPLE(tex) (SAMPLE_WITH_OFFSET(tex, 0, 1))
+#define BOTTOM_SAMPLE(tex) (SAMPLE_WITH_OFFSET(tex, 0, -1))
+
+#define SUM_COMPS(v) ((v.r + v.g + v.b + v.a))
+
+
+#define FlowOutFlux(col) (col.r)
+#define FlowInFlux(col) (col.g)
+
+#define BuildingHeight(col) (col.r)//建筑物高度
+#define ProtectionHeight(col) (col.g)//堤坝高度
+/* ======== INPUTS ======== */
+
+// Heightmap (R - height, G - water height, B - suspended sediment amount, R - Surface hardness)
+
+
+// Heightmap (R - height, G - water height)
+RWTexture2D<float4> HeightMap;
+
+// Velocity field (R - velocity x, G - velocity y)
+RWTexture2D<float2> VelocityMap;
+
+// Water Flux field (R - left, G - right, B - top, A - bottom)
+RWTexture2D<float4> FluxMap;
+
+//outFlow and inFlow texture 之后可以加 排水系统贴图和接受到的水的纹理（雨水分布图、河流流入图） R:排水量、G:增水量、B:雨水分布
+RWTexture2D<float4>InAndOutFlowMap;
+
+
+RWTexture2D<float4>BuildingsAndProtectionMap;//R:building  G:一些堤坝的高度
+
+
+
+// Terrain Flux field (R - left, G - right, B - top, A - bottom) 用来做临时数组
+RWTexture2D<float4> TerrainFluxMap;
+
+
+RWTexture2D<float4>BuildingPoints1;
+RWTexture2D<float4>BuildingPoints2;
+RWTexture2D<float4>BuildingPoints3;
+RWTexture2D<float4>BuildingPoints4;
+
+RWTexture2D<float4>BuildingOutlineMap;
+RWTexture2D<float4>BuildingColorMap;
+
+// r:0表示不是building 1-255是buiding g:
+//RWTexture2D<float4> BuildingColorMap;
+
+//
+
+uint _InputMode;
+bool _mouseClicked;
+float4 _InputControls;
+bool _earlyWarning;
+
+float3 _BarrirSt, _BarrirEd;
+float _BarrirWid, _BarrirHei;
+
+float3 _BuildingOrProtectionSize;// 若是矩形物体就是R长G宽B高、若是圆柱型则为R半径、G高
+//float2 _BuildingCyc;//圆柱建筑物
+//float3 _ProtectionWall;//堤坝墙
+// Fluid simulation properties
+uint _Width;
+uint _Height;
+float _TimeDelta;
+float _PipeArea;
+float _Gravity;
+float _PipeLength;
+float2 _CellSize;
+float _Evaporation;
+float _RainRate;
+
+float _InOutFlowScale;
+
+float _maxTimeStep=0.02;
+
+// Hydraulic erosion properties
+float _SedimentCapacity;
+float _MaxErosionDepth;
+float _SuspensionRate;
+float _DepositionRate; 
+float _SedimentSofteningRate;
+
+// Thermal erosion properties
+float _ThermalErosionTimeScale;
+float _ThermalErosionRate;
+float _TalusAngleTangentCoeff;
+float _TalusAngleTangentBias;
+
+RWTexture2D<float4> Result;
+RWStructuredBuffer<float> solid;
+RWStructuredBuffer<float> depth;
+RWStructuredBuffer<float> uVel;
+RWStructuredBuffer<float> wVel;
+
+float4 SampleBilinear(RWTexture2D<float4> tex, float2 uv)
+{
+	float2 uva = floor(uv);
+	float2 uvb = ceil(uv);
+	uint2 id00 = (uint2)uva;  // 0 0
+	uint2 id10 = uint2(uvb.x, uva.y); // 1 0
+	uint2 id01 = uint2(uva.x, uvb.y); // 0 1	
+	uint2 id11 = (uint2)uvb; // 1 1
+	float2 d = uv - uva;
+	return
+		tex[id00] * (1 - d.x) * (1 - d.y) +
+		tex[id10] * d.x * (1 - d.y) +
+		tex[id01] * (1 - d.x) * d.y +
+		tex[id11] * d.x * d.y;
+}
+
+float4 deviaX(RWTexture2D<float4> tex, uint3 id)
+{
+	float4 right = RIGHT_SAMPLE(tex), left = LEFT_SAMPLE(tex);
+	return (right - left) / (2 * _CellSize.x);
+}
+
+float4 deviaY(RWTexture2D<float4> tex, uint3 id)
+{
+	float4 up = TOP_SAMPLE(tex), down = BOTTOM_SAMPLE(tex);
+	return (up - down) / (2 * _CellSize.y);
+}
+
+
+bool isInRect(uint3 id) {
+	float3 center = (_BarrirSt + _BarrirEd) / 2;
+	float3 axisX =normalize(_BarrirEd - _BarrirSt);
+	float3 axisZ =normalize(cross(axisX, float3(0, 1, 0)));
+	float l = length(_BarrirEd - _BarrirSt) / 2;
+	float b = _BarrirWid / 2;
+	
+	float3 here = float3((float)id.x / _Width,0, (float)id.y / _Height)-center;
+	if (abs(dot(axisX, here)) <= l && abs(dot(axisZ, here)) < b)
+		return true;
+	else
+		return false;
+}
+
+/* Pass 0. editor  设定初始条件*/
+[NUMTHREADS]
+void Edit(uint3 id : SV_DispatchThreadID)
+{
+	float4 currentState = CURRENT_SAMPLE(HeightMap);
+	WATER_HEIGHT(currentState) += _TimeDelta * _RainRate;
+
+	// Water-drawing brush
+	float2 uv = float2((float)id.x / _Width, (float)id.y / _Height);
+	float2 dist = uv - _InputControls.xy;
+	if (length(dist) < abs(_InputControls.z))
+		//if (abs(dist.x) < abs(_InputControls.z/2)&& abs(dist.y) < abs(_InputControls.z / 2))
+	{
+		/*if (_InputMode == 0)
+			WATER_HEIGHT(currentState) = max(0, WATER_HEIGHT(currentState) + _InputControls.w * _TimeDelta);
+		else if (_InputMode == 1)
+			WATER_HEIGHT(currentState) = max(0, WATER_HEIGHT(currentState) - _InputControls.w * _TimeDelta);*/
+	//	else if (_InputMode == 2)
+	//		TERRAIN_HEIGHT(currentState) = max(0, TERRAIN_HEIGHT(currentState) + _InputControls.w * _TimeDelta);
+	//	else if (_InputMode == 3)
+	//		TERRAIN_HEIGHT(currentState) = max(0, TERRAIN_HEIGHT(currentState) - _InputControls.w * _TimeDelta);
+	}
+	//
+	if (_mouseClicked)
+	{
+		//加房子+堤垻
+		float4 BuildingsAndProtectionState = CURRENT_SAMPLE(BuildingsAndProtectionMap);
+		float4 preBuildingsAndProtectionState = BuildingsAndProtectionState;
+		float4 FlowInOut = CURRENT_SAMPLE(InAndOutFlowMap);
+		//if (_InputMode == 4)//添加房子建筑物 矩形
+		//{
+		//	if (abs(dist.x) < abs(_BuildingOrProtectionSize.x / 2) && abs(dist.y) < abs(_BuildingOrProtectionSize.y / 2))
+		//		BuildingHeight(BuildingsAndProtectionState) = max(BuildingHeight(BuildingsAndProtectionState), _BuildingOrProtectionSize.z);
+		//}
+		if (_InputMode == 0)//添加挡板
+		{
+			if (isInRect(id))
+				BuildingHeight(BuildingsAndProtectionState) = max(BuildingHeight(BuildingsAndProtectionState),_BarrirHei);
+		}
+		if (_InputMode == 4)//jiashui
+			if (length(dist) < abs(_InputControls.z))
+			{
+				float t = _InputControls.w;
+				float s = length(dist) / abs(_InputControls.z);
+				t = 2 * t * (1 - s);
+				//FlowInFlux(FlowInOut) = t;
+				WATER_HEIGHT(currentState) = max(0, WATER_HEIGHT(currentState) +t);
+			}
+		
+		if (_InputMode == 5)//jiashui2
+			if (length(dist) < abs(_InputControls.z))
+			{
+				float t = _InputControls.w;
+				//float s = length(dist) / abs(_InputControls.z);
+				//t = 2 * t * (1 - s);
+				WATER_HEIGHT(currentState) = max(0, WATER_HEIGHT(currentState) + t);
+			}
+
+		//{
+		//	if (length(dist) < abs(_InputControls.z))
+		//		BuildingHeight(BuildingsAndProtectionState) = max(BuildingHeight(BuildingsAndProtectionState), _InputControls.w);
+		//}
+		//if (_InputMode == 6)//添加堤坝墙
+		//{
+		//	if (abs(dist.x) < abs(_BuildingOrProtectionSize.x / 2) && abs(dist.y) < abs(_BuildingOrProtectionSize.y / 2))
+		//		ProtectionHeight(BuildingsAndProtectionState) = max(ProtectionHeight(BuildingsAndProtectionState), _BuildingOrProtectionSize.z);
+		//}
+		if (_InputMode == 1)//添加出水口
+		{
+			if (length(dist) < abs(_InputControls.z))
+			{
+				float t = _InputControls.w;
+				float s = length(dist) / abs(_InputControls.z);
+				t = 2*t * (1 - s);
+				FlowInFlux(FlowInOut) = t;
+			}
+				
+			CURRENT_SAMPLE(InAndOutFlowMap) = FlowInOut;
+			//ProtectionHeight(BuildingsAndProtectionState) = max(ProtectionHeight(BuildingsAndProtectionState), _BuildingOrProtectionSize.z);
+		}//
+		if (_InputMode == 2)//添加进水口
+		{
+			if (length(dist) < abs(_InputControls.z))
+			{
+				float t = _InputControls.w;
+				float s = length(dist) / abs(_InputControls.z);
+				t = 2*t * (1 - s);
+				FlowOutFlux(FlowInOut) = t;
+
+			}
+				
+			CURRENT_SAMPLE(InAndOutFlowMap) = FlowInOut;
+				//ProtectionHeight(BuildingsAndProtectionState) = max(ProtectionHeight(BuildingsAndProtectionState), _BuildingOrProtectionSize.z);
+		}
+
+		CURRENT_SAMPLE(BuildingsAndProtectionMap) = BuildingsAndProtectionState;
+		float4 DiffHeight = BuildingsAndProtectionState - preBuildingsAndProtectionState;
+		TERRAIN_HEIGHT(currentState) += DiffHeight.r + DiffHeight.g;
+	}
+	CURRENT_SAMPLE(HeightMap) = currentState;
+}
+
+/* Pass 1. Rain simulation and brush drawing */
+[NUMTHREADS]
+void RainAndControl(uint3 id : SV_DispatchThreadID)
+{
+	float4 currentState = CURRENT_SAMPLE(HeightMap);
+	WATER_HEIGHT(currentState) += _TimeDelta * _RainRate;
+
+	//// Water-drawing brush
+	//float2 uv = float2((float)id.x / _Width, (float)id.y / _Height);
+	//float2 dist = uv - _InputControls.xy;
+	//if (length(dist) < abs(_InputControls.z)) 
+	////if (abs(dist.x) < abs(_InputControls.z/2)&& abs(dist.y) < abs(_InputControls.z / 2))
+	//{
+	//	if(_InputMode == 0)
+	//		WATER_HEIGHT(currentState) = max(0, WATER_HEIGHT(currentState) + _InputControls.w * _TimeDelta);
+	//	else if (_InputMode == 1)
+	//		WATER_HEIGHT(currentState) = max(0, WATER_HEIGHT(currentState) - _InputControls.w * _TimeDelta);
+	//	else if (_InputMode == 2)
+	//		TERRAIN_HEIGHT(currentState) = max(0, TERRAIN_HEIGHT(currentState) + _InputControls.w * _TimeDelta);
+	//	else if (_InputMode == 3)
+	//		TERRAIN_HEIGHT(currentState) = max(0, TERRAIN_HEIGHT(currentState) - _InputControls.w * _TimeDelta);
+	//}
+
+	//if (_mouseClicked)
+	//{
+	//	//加房子+堤垻
+	//	float4 BuildingsAndProtectionState = CURRENT_SAMPLE(BuildingsAndProtectionMap);
+	//	float4 preBuildingsAndProtectionState = BuildingsAndProtectionState;
+	//	if (_InputMode == 4)//添加房子建筑物 矩形
+	//	{
+	//		if (abs(dist.x) < abs(_BuildingOrProtectionSize.x / 2) && abs(dist.y) < abs(_BuildingOrProtectionSize.y / 2))
+	//			BuildingHeight(BuildingsAndProtectionState) = max(BuildingHeight(BuildingsAndProtectionState), _BuildingOrProtectionSize.z);
+	//	}
+	//	if (_InputMode == 5)//添加房子建筑物 圆柱形
+	//	{
+	//		if (length(dist)<abs(_BuildingOrProtectionSize.x))
+	//			BuildingHeight(BuildingsAndProtectionState) = max(BuildingHeight(BuildingsAndProtectionState), _BuildingOrProtectionSize.y);
+	//	}
+	//	if (_InputMode == 6)//添加堤坝墙
+	//	{
+	//		if (abs(dist.x) < abs(_BuildingOrProtectionSize.x / 2) && abs(dist.y) < abs(_BuildingOrProtectionSize.y / 2))
+	//			ProtectionHeight(BuildingsAndProtectionState) = max(ProtectionHeight(BuildingsAndProtectionState), _BuildingOrProtectionSize.z);
+	//	}
+
+	//	CURRENT_SAMPLE(BuildingsAndProtectionMap) = BuildingsAndProtectionState;
+	//	float4 DiffHeight = BuildingsAndProtectionState - preBuildingsAndProtectionState;
+	//	TERRAIN_HEIGHT(currentState) += DiffHeight.r + DiffHeight.g;
+	//	//_mouseClicked = false;
+	//}
+
+
+	float4 flowInAndOut = CURRENT_SAMPLE(InAndOutFlowMap);
+	WATER_HEIGHT(currentState) = max(0, WATER_HEIGHT(currentState) + _InOutFlowScale * (FlowOutFlux(flowInAndOut) - FlowInFlux(flowInAndOut)));
+
+	//WATER_HEIGHT(currentState) = max(0, WATER_HEIGHT(currentState) + _InOutFlowScale * (FlowOutFlux(flowInAndOut) - FlowInFlux(flowInAndOut)));
+
+	////设定边界为悬崖
+	//if (id.x == 0 || id.y == 0 || id.x == _Width - 1 || id.y == _Height - 1) TERRAIN_HEIGHT(currentState) = -100;
+
+	// Write new state to the HeightMap
+	CURRENT_SAMPLE(HeightMap) = currentState;
+}
+
+// 1 advect
+[NUMTHREADS]
+void advect(uint3 id : SV_DispatchThreadID) {//先计算好平流项
+	float4 here = CURRENT_SAMPLE(HeightMap);
+	if (WATER_HEIGHT(here) <= 0.0)
+	{
+		CURRENT_SAMPLE(TerrainFluxMap) = here;
+		return;
+	}
+		
+	float2 x = id.xy * _CellSize.x;
+	float2 v = V(here);
+	v.y = -v.y;//这个地方主要是坐标系的问题  网格的坐标系与速度的坐标系的y轴相反 所以提前先翻转一下y轴
+	float2 xbackward = (x - v * _TimeDelta)/ _CellSize.x;
+	//float2 xbackward = x;
+	
+	float4 origin=SampleBilinear(HeightMap,xbackward);
+
+	//uint2 uvi = (uint2)(floor(xbackward));
+	//float4 origin = HeightMap[uvi];
+
+	//state.gba = HeightMap[xbackward].gba;
+	if (origin.g <= 0.0)
+	{
+		here.b = 0.0;
+		here.a = 0.0;
+	}
+	else
+	{
+		here.gba = origin.gba;
+	}
+	CURRENT_SAMPLE(TerrainFluxMap) = here;
+}
+
+[NUMTHREADS]
+void copy(uint3 id : SV_DispatchThreadID) {
+	//CURRENT_SAMPLE(HeightMap) = CURRENT_SAMPLE(TerrainFluxMap);
+}
+
+[NUMTHREADS]
+void updateHeightImplicit(uint3 id : SV_DispatchThreadID) {
+	float4 state = CURRENT_SAMPLE(TerrainFluxMap);
+	//if (WATER_HEIGHT(state) <= 0.0)
+	//	return;
+	float4 X1 = LEFT_SAMPLE(TerrainFluxMap);
+	float4 X2 = RIGHT_SAMPLE(TerrainFluxMap);
+	float4 Y1 = TOP_SAMPLE(TerrainFluxMap);
+	float4 Y2 = BOTTOM_SAMPLE(TerrainFluxMap);
+
+	float dbdx = (TERRAIN_HEIGHT(X2) - TERRAIN_HEIGHT(X1))/(2* _CellSize.x);
+	float dbdy= (TERRAIN_HEIGHT(Y2) - TERRAIN_HEIGHT(Y1))/(2* _CellSize.y);
+	float u = Vx(state);
+	float v = Vy(state);
+	float n = WATER_HEIGHT(state);
+	float dhdx= (FULL_HEIGHT(X2) - FULL_HEIGHT(X1)) / (2 * _CellSize.x);
+	float dhdy= (FULL_HEIGHT(Y2) - FULL_HEIGHT(Y1)) / (2 * _CellSize.y);
+}
+
+[NUMTHREADS]
+void updateHeight(uint3 id : SV_DispatchThreadID) {
+	float4 state = CURRENT_SAMPLE(TerrainFluxMap);
+	//if (WATER_HEIGHT(state) <= 0.0)
+	//	return;
+	float4 X1 = LEFT_SAMPLE(TerrainFluxMap);
+	float4 X2 = RIGHT_SAMPLE(TerrainFluxMap);
+	float4 Y1 = TOP_SAMPLE(TerrainFluxMap);
+	float4 Y2 = BOTTOM_SAMPLE(TerrainFluxMap);
+
+	float h = FULL_HEIGHT(state);
+	float n = WATER_HEIGHT(state);
+	float u = state.b, v = state.a;
+
+	float newH = n;
+	float wettingThreshold = 0.000001;
+	float newlyWetHeight = 0.0000003;
+	float minFluxArea = 0.01;
+	if (n <= 0.0) {
+		if ((WATER_HEIGHT(X1) > wettingThreshold&& FULL_HEIGHT(X1) > TERRAIN_HEIGHT(state) + wettingThreshold) || (WATER_HEIGHT(X2) > wettingThreshold&& FULL_HEIGHT(X2) > TERRAIN_HEIGHT(state) + wettingThreshold) || (WATER_HEIGHT(Y1) > wettingThreshold&& FULL_HEIGHT(Y1) > TERRAIN_HEIGHT(state) + wettingThreshold) || (WATER_HEIGHT(Y2) > wettingThreshold&& FULL_HEIGHT(Y2) > TERRAIN_HEIGHT(state) + wettingThreshold))
+			newH = newlyWetHeight;
+		else
+			newH = n;
+	}
+	else
+	{
+
+		//float4 dx = deviaX(HeightMap, id), dy = deviaY(HeightMap, id);
+		//newH = n + (u * dx.r + v * dy.r - n * (dx.b + dy.a)) * _TimeDelta;
+		float fluxArea = max(n, minFluxArea);
+		float dVelocityX = ( Vx(X2) - Vx(X1) ) / (2.0 * _CellSize.x);
+		float dVelocityY = ( Vy(Y2) - Vy(Y1) ) / (2.0 * _CellSize.y);
+		float velocityDivergence = (dVelocityX + dVelocityY);
+		newH = n - fluxArea * velocityDivergence * _TimeDelta;
+
+		//////
+		newH = max(-0.00001, newH);
+		newH = min(n * 2.0, newH);
+		//newH = min(10, newH);
+	}
+	
+	state.g = newH;
+	CURRENT_SAMPLE(HeightMap)=state;
+	
+}
+
+[NUMTHREADS]
+void updateVelocity(uint3 id : SV_DispatchThreadID) {//速度场扩散项
+	float4 state = CURRENT_SAMPLE(HeightMap);
+	//if (WATER_HEIGHT(state) <= 0.0)
+	//	return;//
+	float h = FULL_HEIGHT(state);
+	float n = state.g;
+
+	float waterZero = 0.0;
+
+	if (n <= waterZero)
+	{
+		 state.b = state.a = 0.0;
+	}
+	else
+	{
+		float u = state.b, v = state.a;
+
+		float4 X1 = LEFT_SAMPLE(HeightMap);
+		float4 X2 = RIGHT_SAMPLE(HeightMap);
+
+	/*	float4 Y1 = TOP_SAMPLE(HeightMap);
+		float4 Y2 = BOTTOM_SAMPLE(HeightMap);*/
+		float4 Y1 = TOP_SAMPLE(HeightMap);
+		float4 Y2 = BOTTOM_SAMPLE(HeightMap);
+
+		float L_X1 = (WATER_HEIGHT(X1) <= waterZero && TERRAIN_HEIGHT(X1) > FULL_HEIGHT(state)) ? FULL_HEIGHT(state) : FULL_HEIGHT(X1);
+		float L_X2 = (WATER_HEIGHT(X2) <= waterZero && TERRAIN_HEIGHT(X2) > FULL_HEIGHT(state)) ? FULL_HEIGHT(state) : FULL_HEIGHT(X2);
+		float L_Y1 = (WATER_HEIGHT(Y1) <= waterZero && TERRAIN_HEIGHT(Y1) > FULL_HEIGHT(state)) ? FULL_HEIGHT(state) : FULL_HEIGHT(Y1);
+		float L_Y2 = (WATER_HEIGHT(Y2) <= waterZero && TERRAIN_HEIGHT(Y2) > FULL_HEIGHT(state)) ? FULL_HEIGHT(state) : FULL_HEIGHT(Y2);
+
+		//float L_X1 = FULL_HEIGHT(X1);
+		//float L_X2 = FULL_HEIGHT(X2);
+		//float L_Y1 = FULL_HEIGHT(Y1);
+		//float L_Y2 = FULL_HEIGHT(Y2);
+
+
+		float2 slope = float2(L_X2 - L_X1, L_Y2 - L_Y1) / (2.0 * _CellSize.x);
+
+
+		float mc = 0.013;
+		float2 frictionSlope = V(state) * length(V(state)) * pow(mc, 2.0) / pow(WATER_HEIGHT(state), 4.0 / 3.0);
+
+		float2 totalSlope = slope + frictionSlope;
+
+		// make sure new slope doesn't point in other direction
+		totalSlope.x = slope.x < 0.0 ? min(totalSlope.x, 0.0) : max(totalSlope.x, 0.0);
+		totalSlope.x = slope.x == 0.0 ? 0.0 : totalSlope.x;
+		totalSlope.y = slope.y < 0.0 ? min(totalSlope.y, 0.0) : max(totalSlope.y, 0.0);
+		totalSlope.y = slope.y == 0.0 ? 0.0 : totalSlope.y;
+
+		//if(sloep)
+
+		float2 newV = V(state)- 9.81 * totalSlope * _TimeDelta;
+		/*float4 dx = deviaX(HeightMap, id), dy = deviaY(HeightMap, id);
+		u = u + (-9.8 * FULL_HEIGHT(dx)) * _TimeDelta;
+		v = v + (-9.8 * FULL_HEIGHT(dy)) * _TimeDelta;*/
+
+
+		//float maxVelocity = 0.5 * _CellSize.x / _TimeDelta;
+
+		//if (length(newV) > maxVelocity)
+		//	newV *= maxVelocity / length(newV);
+
+
+		if (WATER_HEIGHT(X1) <= waterZero || WATER_HEIGHT(X2) <= waterZero)
+			newV.x = 0;
+		if (WATER_HEIGHT(Y1) <= waterZero || WATER_HEIGHT(Y2) <= waterZero)
+			newV.y = 0;
+
+
+
+
+		V(state) = newV;
+		//state.b = newV.x;
+		//state.a = newV.y;
+	}
+
+	CURRENT_SAMPLE(TerrainFluxMap) = state;
+
+	float2 vel=state.ba;
+	vel.y = -vel.y;
+	CURRENT_SAMPLE(VelocityMap) = vel;
+}
+
+[NUMTHREADS]
+void copy2(uint3 id : SV_DispatchThreadID) {
+	CURRENT_SAMPLE(HeightMap) = CURRENT_SAMPLE(TerrainFluxMap);
+}
+
+/* Pass 2. Flux field computation */
+[NUMTHREADS]
+void FluxComputation(uint3 id : SV_DispatchThreadID) 
+{
+	// Sample the heighmap (state map)
+	float4 state = CURRENT_SAMPLE(HeightMap);
+	float4 stateLeft = LEFT_SAMPLE(HeightMap);
+	float4 stateRight = RIGHT_SAMPLE(HeightMap);
+	float4 stateTop = TOP_SAMPLE(HeightMap);
+	float4 stateBottom = BOTTOM_SAMPLE(HeightMap);
+	//float g = 9.81;
+	//float dhudx = (stateLeft.r * stateLeft.b + stateRight.r * stateRight.b - 2 * state.r * state.b) / 2;
+	//float dhvdy= (stateTop.r * stateTop.a + stateBottom.r * stateBottom.a - 2 * state.r * state.a) / 2;
+	//float dhu2dx= (stateLeft.r * stateLeft.b*stateLeft.b + stateRight.r * stateRight.b*stateRight.b- 2 * state.r * state.b*state.b) / 2;
+	//float dhuvdy= (stateTop.r * stateTop.b* stateTop.a + stateBottom.r * stateBottom.a* stateBottom.b - 2 * state.r * state.a*state.b) / 2;
+	//float dBdx= (stateLeft.g + stateRight.g - 2 * state.g) / 2;
+	//float dBdy= (stateTop.g + stateBottom.g - 2 * state.g) / 2;
+	//float dhuvdx= (stateLeft.r * stateLeft.b * stateLeft.a + stateRight.r * stateRight.a * stateRight.b - 2 * state.r * state.a * state.b) / 2;
+	//float dhv2dy= (stateTop.r * stateTop.a* stateTop.a + stateBottom.r * stateBottom.a * stateBottom.a - 2 * state.r * state.a * state.a) / 2;
+	//float dgh2dx= (stateLeft.r * stateLeft.r + stateRight.r * stateRight.r- 2 * state.r * state.r)*g / 2;
+	//float dgh2dy= (stateTop.r * stateTop.r + stateBottom.r * stateBottom.r - 2 * state.r * state.r) * g / 2;
+	//float D = 0.01;
+	//state.r += -dhudx - dhvdy;
+	//float hu = state.r * state.b - g * state.r * dBdx - D * state.b - (dhu2dx + 0.5 * dgh2dx + dhuvdy);
+	//float hv = state.r * state.a - g * state.r * dBdy - D * state.a - (dhuvdx + 0.5 * dgh2dy + dhv2dy);
+	//if (state.r <= 0.001)
+	//	return;
+	//state.b = hu / state.r;
+	//state.a = hv / state.r;
+
+	//float4 BuildingsAndProtectionState = CURRENT_SAMPLE(BuildingsAndProtectionMap);
+
+	float terrainHeight = TERRAIN_HEIGHT(state);//裸露地形高度
+	float waterHeight = WATER_HEIGHT(state);
+
+	// Flow simulation using shallow-water model. Computation of the velocity field and water height changes.
+	// Sample flux
+	float4 outputFlux = CURRENT_SAMPLE(FluxMap);
+
+	// Overall height difference in each direction
+	float4 heightDifference = FULL_HEIGHT(state) - float4(
+		FULL_HEIGHT(stateLeft),
+		FULL_HEIGHT(stateRight),
+		FULL_HEIGHT(stateTop),
+		FULL_HEIGHT(stateBottom));
+
+
+	// Output flux	
+	outputFlux = max(0.00001, outputFlux + _TimeDelta * _Gravity * _PipeArea * heightDifference / _PipeLength);
+	//outputFlux = max(0, _TimeDelta * _Gravity * _PipeArea * heightDifference / _PipeLength);
+
+	/*
+		Rescale flux
+		The total outflow should not exceed the total amount
+		of the water in the given cell.If the calculated value is
+		larger than the current amount in the given cell, then flux will
+		be scaled down with an appropriate factor
+	*/
+	outputFlux *= min(1, waterHeight * _CellSize.x * _CellSize.y / (SUM_COMPS(outputFlux) * _TimeDelta));
+
+
+
+	//if (id.x == 0 || id.y == 0 || id.x == _Width - 1 || id.y == _Height - 1)
+	//{
+	//	LDIR(outputFlux) = 0;
+	//	BDIR(outputFlux) = 0;
+	//	RDIR(outputFlux) = 0;
+	//	TDIR(outputFlux) = 0;
+	//}
+	// Boundaries (uncomment thisif you want water to bounce of boundaries)						
+	if (id.x == 0) LDIR(outputFlux) = 0;
+	if (id.y == 0) BDIR(outputFlux) = 0;
+	if (id.x == _Width - 1) RDIR(outputFlux) = 0;
+	if (id.y == _Height - 1) TDIR(outputFlux) = 0;	
+
+
+
+	// Write new flux to the FluxMap
+	CURRENT_SAMPLE(FluxMap) = max(0, outputFlux);
+
+
+	CURRENT_SAMPLE(BuildingColorMap) = 0;
+	CURRENT_SAMPLE(VelocityMap) = 0;
+}
+//
+
+/* Pass 2.5. Flux field computation */
+//[NUMTHREADS]
+//void FluxEdgeComputation(uint3 id : SV_DispatchThreadID)
+//{
+//	float4 outputFlux = CURRENT_SAMPLE(FluxMap);
+//	if (id.x == 0) LDIR(outputFlux) = LDIR(RIGHT_SAMPLE(FluxMap));
+//	if (id.y == 0) BDIR(outputFlux) = BDIR(TOP_SAMPLE(FluxMap));
+//	if (id.x == _Width - 1) RDIR(outputFlux) = RDIR(LEFT_SAMPLE(FluxMap));
+//	if (id.y == _Height - 1) TDIR(outputFlux) = TDIR(BOTTOM_SAMPLE(FluxMap)));
+//
+//	// Write new flux to the FluxMap
+//	CURRENT_SAMPLE(FluxMap) = max(0, outputFlux);
+//}
+
+/* Pass 3. Applying fluxes to the actual cells and changing weter height */
+[NUMTHREADS]
+void FluxApply(uint3 id : SV_DispatchThreadID)
+{
+	float4 state = CURRENT_SAMPLE(HeightMap);
+	float4 outputFlux = CURRENT_SAMPLE(FluxMap);
+	float4 inputFlux = float4(
+		RDIR(LEFT_SAMPLE(FluxMap)),
+		LDIR(RIGHT_SAMPLE(FluxMap)),
+		BDIR(TOP_SAMPLE(FluxMap)),
+		TDIR(BOTTOM_SAMPLE(FluxMap)));
+	float waterHeightBefore = WATER_HEIGHT(state);
+
+	// Water surface and velocity field update
+	// volume is changing by amount on incoming fluid volume minus outgoing
+	float volumeDelta = SUM_COMPS(inputFlux) - SUM_COMPS(outputFlux);	
+
+	// Then, we update the water height in the current (x, y) cell:
+	WATER_HEIGHT(state) += _TimeDelta * volumeDelta / (_CellSize.x * _CellSize.y);	
+
+
+	float t = WATER_HEIGHT(state);
+	t = floor(t * 100000)/100000;
+		WATER_HEIGHT(state) = t;
+
+	//直接让边界上的水消失
+	//if (id.x == 0||id.y==0||id.x==_Width-1||id.y==_Height-1) WATER_HEIGHT(state) = 0;
+
+
+
+	// Write new state to the HeightMap
+	CURRENT_SAMPLE(HeightMap) = state;
+
+
+	//float2 v= float2(
+	//	0.5 * (LDIR(inputFlux) - LDIR(outputFlux) + RDIR(outputFlux) - RDIR(inputFlux)),
+	//	0.5 * (BDIR(inputFlux) - BDIR(outputFlux) + TDIR(outputFlux) - TDIR(inputFlux)));
+	 
+
+	// Compute new velocity from flux to the VelocityMap			
+	CURRENT_SAMPLE(VelocityMap) = float2(
+		0.5 * (LDIR(inputFlux) - LDIR(outputFlux) + RDIR(outputFlux) - RDIR(inputFlux)),
+		0.5 * (BDIR(inputFlux) - BDIR(outputFlux) + TDIR(outputFlux) - TDIR(inputFlux)));
+		/// _PipeLength * 0.5 * (waterHeightBefore + WATER_HEIGHT(state));
+
+	//直接让边界上的水消失
+	//if (id.x == 0 || id.y == 0 || id.x == _Width - 1 || id.y == _Height - 1) CURRENT_SAMPLE(VelocityMap) = float2(0, 0);
+
+	//_maxTimeStep = max(_maxTimeStep, _CellSize.x / CURRENT_SAMPLE(VelocityMap).x);
+	//_maxTimeStep = max(_maxTimeStep, _CellSize.y / CURRENT_SAMPLE(VelocityMap).y);
+	//float4 ss = CURRENT_SAMPLE(BuildingOutlineMap);
+
+
+	CURRENT_SAMPLE(BuildingColorMap) = 0;//
+	//float4 tt = CURRENT_SAMPLE(BuildingOutlineMap);
+	//uint bulidingOutlineIndex =(uint)(tt.b*255.0f+0.5f);//
+
+
+
+	//int index = 256*256*(int)(bulidingOutline.r*255) + 256*(int)(bulidingOutline.g*255) + (int)(bulidingOutline.b*255);
+	//int index =(int)(bulidingOutline.r * 255) + (int)(bulidingOutline.g * 255) + (int)(bulidingOutline.b * 255);
+	
+	//if (bulidingOutlineIndex == 0)
+	//	return;
+
+	//uint tmp = 1;
+	//uint value;
+	//BuildingColorMap[uint2(0, bulidingOutlineIndex)] = 1;
+	//InterlockedMax(BuildingColorMap[uint2(0, bulidingOutlineIndex)],tmp,value);
+
+	//CURRENT_SAMPLE(BuildingColorMap) = float4(1.0, 1.0, 1.0, 1.0);
+	//if (index < 2048 && index>0)
+	//{
+	//	for (int i = 0; i < _Width; i++)
+	//		BuildingColorMap[uint2(i, 1024)] = BuildingColorMap[uint2(i, 1025)] = BuildingColorMap[uint2(i, i)] =float4(0, 1.0, 0, 1.0);
+	//	//for (int i = 0; i < _Width; i++)
+	//	//	BuildingColorMap[uint2(i, index)] = float4(1.0, 0, 0, 1.0);
+	//}
+		
+
+	/*if(index>=2048)
+		CURRENT_SAMPLE(BuildingColorMap) = float4(1.0, 0, 0, 1.0);
+	else if(index<2048)
+		for (int i = 0; i < _Width; i++)
+			BuildingColorMap[int2(i, index)] = float4(0, 1.0, 0, 1.0);*/
+	//float sum=BuildingColorMap[uint2(index / _Width, index % _Width)].r;
+	//InterlockedMax(BuildingColorMap[uint2(index / _Width,index % _Width)].r, (int)state.r);
+
+
+
+	//float4 tmp = BuildingColorMap[uint2(bulidingOutlineIndex / _Width, bulidingOutlineIndex % _Width)];
+	//tmp.r=	max(tmp.r, state.g);//
+	//for(int i=0;i< bulidingOutlineIndex;i++)
+	//	BuildingColorMap[uint2(0,i)] = 1;
+	//if(state.g >0)
+	//for(int i=1;i<=77;i++)
+	//	BuildingColorMap[uint2(0, i)] = float4(1.0, 0, 0, i * 0.001);//
+
+	//BuildingColorMap[uint2(0, bulidingOutlineIndex)] = float4(tt.r,tt.g,tt.b, bulidingOutlineIndex*0.0001);//
+
+//	BuildingColorMap[uint2(0, 1)] = float4(1.0, 0, 0, 1.0);
+	//CURRENT_SAMPLE(BuildingColorMap)=1;
+}
+
+#define f2i(a) ((int)(a*255+0.01))//0-1 :  0-255
+
+/* Pass 3.5. Applying fluxes to the actual cells and changing weter height */
+[NUMTHREADS]
+//void ComputeBuildingColor(uint3 id : SV_DispatchThreadID)
+//{
+//	int x = id.x * 2;
+//	int y = id.y * 2;
+//	//if (x >= _Width || y >= _Height)
+//	//	return;
+//	//if (y > 0)
+//	//	return;
+//	float4 sample1 = BuildingOutlineMap[uint2(x, y)];
+//	float4 sample2 = BuildingOutlineMap[uint2(x, y+1)];
+//	float4 sample3 = BuildingOutlineMap[uint2(x+1, y)];
+//	float4 sample4 = BuildingOutlineMap[uint2(x+1, y+1)];
+//
+//
+//	/*sample1.g = 1.0 - sample1.g;
+//	sample2.g = 1.0 - sample2.g;
+//	sample3.g = 1.0 - sample3.g;
+//	sample4.g = 1.0 - sample4.g;
+//	sample1.a = 1.0 - sample1.a;
+//	sample2.a = 1.0 - sample2.a;
+//	sample3.a = 1.0 - sample3.a;
+//	sample4.a = 1.0 - sample4.a;*/
+//
+//	//sample1.r = 1.0 - sample1.r;
+//	//sample2.r = 1.0 - sample2.r;
+//	//sample3.r = 1.0 - sample3.r;
+//	//sample4.r = 1.0 - sample4.r;
+//	//sample1.b = 1.0 - sample1.b;
+//	//sample2.b = 1.0 - sample2.b;
+//	//sample3.b = 1.0 - sample3.b;
+//	//sample4.b = 1.0 - sample4.b;
+//
+//	float err = 0.000001;
+//	if (sample1.r <= err && sample1.g <= err && (sample2.r <= err) && (sample2.g <= err))//
+//		return;
+//	float waterDepth = 0.0;
+//	//waterDepth = HeightMap[uint2(sample1.r * _Width, sample2.r * _Width)].g+ HeightMap[uint2(sample1.g * _Width, sample2.g * _Width)].g + HeightMap[uint2(sample1.b * _Width, sample2.b * _Width)].g + HeightMap[uint2(sample1.a * _Width, sample2.a * _Width)].g + 
+//	//	HeightMap[uint2(sample3.r * _Width, sample4.r * _Width)].g + HeightMap[uint2(sample3.g * _Width, sample4.g * _Width)].g + HeightMap[uint2(sample3.b * _Width, sample4.b * _Width)].g + HeightMap[uint2(sample3.a * _Width, sample4.a * _Width)].g;
+//	//
+//	//waterDepth = HeightMap[uint2(sample2.r * _Width, sample1.r * _Width)].g + HeightMap[uint2(sample2.g * _Width, sample1.g * _Width)].g + HeightMap[uint2(sample2.b * _Width, sample1.b * _Width)].g + HeightMap[uint2(sample2.a * _Width, sample1.a * _Width)].g +
+//	//	HeightMap[uint2(sample4.r * _Width, sample3.r * _Width)].g + HeightMap[uint2(sample4.g * _Width, sample3.g * _Width)].g + HeightMap[uint2(sample4.b * _Width, sample3.b * _Width)].g + HeightMap[uint2(sample4.a * _Width, sample3.a * _Width)].g;
+//		
+//	waterDepth = HeightMap[uint2(sample1.r * _Width, sample2.r * _Width)].g;
+//
+//	//waterDepth /= 8;
+//	CURRENT_SAMPLE(BuildingColorMap) = float4(1.0, sample1.r, sample2.r,0);
+//	//BuildingColorMap[uint2(sample1.r * _Width, sample2.r * _Width)] = BuildingColorMap[uint2(sample1.g * _Width, sample2.g * _Width)] = BuildingColorMap[uint2(sample1.b * _Width, sample2.b * _Width)] = BuildingColorMap[uint2(sample1.a * _Width, sample2.a * _Width)] = float4(1, 0, 0, 0);
+//}
+
+void ComputeBuildingColor(uint3 id : SV_DispatchThreadID)
+{
+	if (_earlyWarning == false)
+	{
+		CURRENT_SAMPLE(BuildingColorMap) = 0;
+		return;
+	}
+	float4 sample1 = CURRENT_SAMPLE(BuildingPoints1);
+	float4 sample2 = CURRENT_SAMPLE(BuildingPoints2);
+	float4 sample3 = CURRENT_SAMPLE(BuildingPoints3);
+	float4 sample4 = CURRENT_SAMPLE(BuildingPoints4);
+
+	int a = f2i(sample1.r)*256+ f2i(sample1.g);
+	int b = f2i(sample1.b) * 256 + f2i(sample1.a);
+	int c = f2i(sample2.r) * 256 + f2i(sample2.g);
+	int d = f2i(sample2.b) * 256 + f2i(sample2.a);
+	int e = f2i(sample3.r) * 256 + f2i(sample3.g);
+	int f = f2i(sample3.b) * 256 + f2i(sample3.a);
+	int g = f2i(sample4.r) * 256 + f2i(sample4.g);
+	int h = f2i(sample4.b) * 256 + f2i(sample4.a);
+
+
+	//a /= 2; b /= 2; c /= 2; d /= 2; e /= 2; f /= 2; g /= 2; h /= 2;//8192/4096
+
+
+	if (a == 0 && b == 0 && c == 0 && d == 0 && e == 0 && f == 0 && g == 0 && h == 0)
+		return;
+
+	float waterDepth = 0.0;
+	//waterDepth = HeightMap[uint2(a,  b)].g + HeightMap[uint2(c,  d)].g + HeightMap[uint2(e,  f)].g + HeightMap[uint2(g, h)].g;
+	//waterDepth = HeightMap[uint2(b, _Width-1-a)].g + HeightMap[uint2(d, _Width - 1 - c)].g + HeightMap[uint2(f, _Width - 1 - e)].g + HeightMap[uint2(h, _Width - 1 - g)].g;
+	//waterDepth = HeightMap[uint2(sample2.r * _Width, sample1.r * _Width)].g + HeightMap[uint2(sample2.g * _Width, sample1.g * _Width)].g + HeightMap[uint2(sample2.b * _Width, sample1.b * _Width)].g + HeightMap[uint2(sample2.a * _Width, sample1.a * _Width)].g +
+	//	HeightMap[uint2(sample4.r * _Width, sample3.r * _Width)].g + HeightMap[uint2(sample4.g * _Width, sample3.g * _Width)].g + HeightMap[uint2(sample4.b * _Width, sample3.b * _Width)].g + HeightMap[uint2(sample4.a * _Width, sample3.a * _Width)].g;
+
+	//waterDepth = HeightMap[uint2(sample1.r * _Width, sample2.r * _Width)].g;
+
+	//waterDepth /= 4;
+
+	for (int i = -3; i < 4; i++)
+	{
+		for (int j = -3; j < 4; j++)
+		{
+			waterDepth = max(waterDepth, HeightMap[uint2(a + i, b + j)].g);//
+			waterDepth = max(waterDepth, HeightMap[uint2(c + i, d + j)].g);
+			waterDepth = max(waterDepth, HeightMap[uint2(e + i, f + j)].g);
+			waterDepth = max(waterDepth, HeightMap[uint2(g + i, h + j)].g);
+		}
+	}
+
+
+	CURRENT_SAMPLE(BuildingColorMap) = waterDepth;
+	//BuildingColorMap[uint2(sample1.r * _Width, sample2.r * _Width)] = BuildingColorMap[uint2(sample1.g * _Width, sample2.g * _Width)] = BuildingColorMap[uint2(sample1.b * _Width, sample2.b * _Width)] = BuildingColorMap[uint2(sample1.a * _Width, sample2.a * _Width)] = float4(1, 0, 0, 0);
+}
+
+
+void ComputeBuildingColorPhysIKA(uint3 id : SV_DispatchThreadID)
+{
+	if (_earlyWarning == false)
+	{
+		CURRENT_SAMPLE(BuildingColorMap) = 0;
+		return;
+	}
+	float4 sample1 = CURRENT_SAMPLE(BuildingPoints1);
+	float4 sample2 = CURRENT_SAMPLE(BuildingPoints2);
+	float4 sample3 = CURRENT_SAMPLE(BuildingPoints3);
+	float4 sample4 = CURRENT_SAMPLE(BuildingPoints4);
+
+	int a = f2i(sample1.r) * 256 + f2i(sample1.g);
+	int b = f2i(sample1.b) * 256 + f2i(sample1.a);
+	int c = f2i(sample2.r) * 256 + f2i(sample2.g);
+	int d = f2i(sample2.b) * 256 + f2i(sample2.a);
+	int e = f2i(sample3.r) * 256 + f2i(sample3.g);
+	int f = f2i(sample3.b) * 256 + f2i(sample3.a);
+	int g = f2i(sample4.r) * 256 + f2i(sample4.g);
+	int h = f2i(sample4.b) * 256 + f2i(sample4.a);
+
+
+	//a /= 2; b /= 2; c /= 2; d /= 2; e /= 2; f /= 2; g /= 2; h /= 2;//8192/4096
+
+
+	if (a == 0 && b == 0 && c == 0 && d == 0 && e == 0 && f == 0 && g == 0 && h == 0)
+		return;
+
+	float waterDepth = 0.0;
+	//waterDepth = HeightMap[uint2(a,  b)].g + HeightMap[uint2(c,  d)].g + HeightMap[uint2(e,  f)].g + HeightMap[uint2(g, h)].g;
+	//waterDepth = HeightMap[uint2(b, _Width-1-a)].g + HeightMap[uint2(d, _Width - 1 - c)].g + HeightMap[uint2(f, _Width - 1 - e)].g + HeightMap[uint2(h, _Width - 1 - g)].g;
+	//waterDepth = HeightMap[uint2(sample2.r * _Width, sample1.r * _Width)].g + HeightMap[uint2(sample2.g * _Width, sample1.g * _Width)].g + HeightMap[uint2(sample2.b * _Width, sample1.b * _Width)].g + HeightMap[uint2(sample2.a * _Width, sample1.a * _Width)].g +
+	//	HeightMap[uint2(sample4.r * _Width, sample3.r * _Width)].g + HeightMap[uint2(sample4.g * _Width, sample3.g * _Width)].g + HeightMap[uint2(sample4.b * _Width, sample3.b * _Width)].g + HeightMap[uint2(sample4.a * _Width, sample3.a * _Width)].g;
+
+	//waterDepth = HeightMap[uint2(sample1.r * _Width, sample2.r * _Width)].g;
+
+	//waterDepth /= 4;
+
+	for (int i = -3; i < 4; i++)
+	{
+		for (int j = -3; j < 4; j++)
+		{
+			waterDepth = max(waterDepth, HeightMap[uint2(a + i, b + j)].g);//
+			waterDepth = max(waterDepth, HeightMap[uint2(c + i, d + j)].g);
+			waterDepth = max(waterDepth, HeightMap[uint2(e + i, f + j)].g);
+			waterDepth = max(waterDepth, HeightMap[uint2(g + i, h + j)].g);
+		}
+	}
+
+
+	CURRENT_SAMPLE(BuildingColorMap) = waterDepth;
+}
+
+/* Pass 4. Terrain hydraulic erosion and deposition */
+[NUMTHREADS]
+void HydraulicErosion(uint3 id : SV_DispatchThreadID)
+{	
+	// Sample the heighmap (state map)
+	float4 state = CURRENT_SAMPLE(HeightMap);
+	float4 stateLeft = LEFT_SAMPLE(HeightMap);
+	float4 stateRight = RIGHT_SAMPLE(HeightMap);
+	float4 stateTop = TOP_SAMPLE(HeightMap);
+	float4 stateBottom = BOTTOM_SAMPLE(HeightMap);
+	float2 velocity = CURRENT_SAMPLE(VelocityMap);
+
+
+	// Tilt angle computation
+	float3 dhdx = float3(2 * _CellSize.x, TERRAIN_HEIGHT(stateRight) - TERRAIN_HEIGHT(stateLeft), 0);
+	float3 dhdy = float3(0, TERRAIN_HEIGHT(stateTop) - TERRAIN_HEIGHT(stateBottom), 2 * _CellSize.y);
+	float3 normal = cross(dhdx, dhdy);
+
+	float sinTiltAngle = abs(normal.y) / length(normal);
+	
+	// Erosion limiting factor
+	float lmax = saturate(1 - max(0, _MaxErosionDepth - WATER_HEIGHT(state)) / _MaxErosionDepth);
+	float sedimentTransportCapacity = _SedimentCapacity * length(velocity) * min(sinTiltAngle, 0.05) * lmax;
+
+	if (SEDIMENT(state) < sedimentTransportCapacity)
+	{
+		float mod = _TimeDelta * _SuspensionRate * HARDNESS(state) * (sedimentTransportCapacity - SEDIMENT(state));		
+		TERRAIN_HEIGHT(state) -= mod;
+		SEDIMENT(state) += mod;
+		WATER_HEIGHT(state) += mod;
+	}
+	else
+	{
+		float mod = _TimeDelta * _DepositionRate * (SEDIMENT(state) - sedimentTransportCapacity);
+		TERRAIN_HEIGHT(state) += mod;
+		SEDIMENT(state) -= mod;
+		WATER_HEIGHT(state) -= mod;
+	}	
+
+	// Water evaporation.
+	WATER_HEIGHT(state) *= 1 - _Evaporation * _TimeDelta;
+	 
+	// Hardness update
+	HARDNESS(state) = HARDNESS(state) - _TimeDelta * _SedimentSofteningRate * _SuspensionRate * (SEDIMENT(state) - sedimentTransportCapacity);
+	HARDNESS(state) = clamp(HARDNESS(state), 0.1, 1);
+
+	// Write heighmap
+	CURRENT_SAMPLE(HeightMap) = state;
+}
+
+
+/* Pass 5. Terrain hydraulic erosion second step. Advecting sediment */
+[NUMTHREADS]
+void SedimentAdvection(uint3 id : SV_DispatchThreadID)
+{
+	float4 state = CURRENT_SAMPLE(HeightMap);
+	float2 velocity = CURRENT_SAMPLE(VelocityMap); 
+
+	// Sediment advection
+	SEDIMENT(state) = SEDIMENT(SampleBilinear(HeightMap, id.xy - velocity * _TimeDelta));
+
+	// Write heightmap
+	CURRENT_SAMPLE(HeightMap) = state;
+}
+
+
+/* Pass 6. Terrain thermal erosion */
+[NUMTHREADS]
+void ThermalErosion(uint3 id : SV_DispatchThreadID)
+{	
+	float4 state = CURRENT_SAMPLE(HeightMap);	
+
+	// Neighbors
+	float4 neighborHeights = float4(
+		TERRAIN_HEIGHT(LEFT_SAMPLE(HeightMap)),
+		TERRAIN_HEIGHT(RIGHT_SAMPLE(HeightMap)),
+		TERRAIN_HEIGHT(TOP_SAMPLE(HeightMap)),
+		TERRAIN_HEIGHT(BOTTOM_SAMPLE(HeightMap))
+	);
+
+	// Overall height difference in each direction
+	float4 heightDifference = max(0, TERRAIN_HEIGHT(state) - neighborHeights);
+	float maxHeightDifference = max(max(heightDifference.x, heightDifference.y), max(heightDifference.z, heightDifference.w));
+
+	// First, we need to compute the amount of terrain to be moved from the current cell
+	// It is capped at [Area * MaxHeightDifference / 2] because it will oscillate if we will allow 
+	// more mass to flow per update
+	// ErosionRate and Hardness are just control variables to reduce the erosion where and when needed
+	float volumeToBeMoved = _CellSize.x * _CellSize.y * maxHeightDifference * 0.5 
+		* _ThermalErosionRate * HARDNESS(state);
+	
+	// Compute angles for every neighbor
+	// Actually a tan(angle)
+	// NOTE: If Cellsize.X and _Cellsize.y are different 
+	// you need to use .x for first 2 components and .y for last 2
+	float4 tanAngle = heightDifference / _CellSize.x;
+	
+	// We need to define a threshold for the angle to identify in which direction the mass is falling
+	// It based on hardness of the material and some more control variables
+	float treshold = HARDNESS(state) * _TalusAngleTangentCoeff + _TalusAngleTangentBias;
+	
+	// Next we need to set proportions that defines how much mass is transfered in each direction
+	// Some directions will not contribute because of not enough steep angles
+	// We are 
+	float4 k = 0;
+	
+	if (tanAngle.x > treshold)
+		k.x = heightDifference.x;
+
+	if (tanAngle.y > treshold)
+		k.y = heightDifference.y;
+
+	if (tanAngle.z > treshold)
+		k.z = heightDifference.z;
+
+	if (tanAngle.w > treshold)
+		k.w = heightDifference.w;	
+
+	// Output flux
+	float sumProportions = SUM_COMPS(k);
+	float4 outputFlux = 0;
+
+	if (sumProportions > 0)
+		outputFlux = volumeToBeMoved * k / sumProportions;
+		
+	// Boundaries (uncomment thisif you want water to bounce of boundaries)						
+	if (id.x == 0) LDIR(outputFlux) = 0;
+	if (id.y == 0) BDIR(outputFlux) = 0;
+	if (id.x == _Width - 1) RDIR(outputFlux) = 0;
+	if (id.y == _Height - 1) TDIR(outputFlux) = 0;	
+
+	CURRENT_SAMPLE(TerrainFluxMap) = outputFlux;
+}
+
+/* Pass 7. Apply thermal erosion */
+[NUMTHREADS]
+void ApplyThermalErosion(uint3 id : SV_DispatchThreadID)
+{
+	float4 state = CURRENT_SAMPLE(HeightMap);
+	float4 outputFlux = CURRENT_SAMPLE(TerrainFluxMap);
+	float4 inputFlux = float4(
+		RDIR(LEFT_SAMPLE(TerrainFluxMap)),
+		LDIR(RIGHT_SAMPLE(TerrainFluxMap)),
+		BDIR(TOP_SAMPLE(TerrainFluxMap)),
+		TDIR(BOTTOM_SAMPLE(TerrainFluxMap)));	
+	
+	// Volume is changing by amount on incoming mass minus outgoing mass
+	float volumeDelta = SUM_COMPS(inputFlux) - SUM_COMPS(outputFlux);
+
+	// Then, we update the terrain height in the current (x, y) cell
+	// min - is to prevent addind more mass than in flux
+	TERRAIN_HEIGHT(state) += min(1, _TimeDelta * _ThermalErosionTimeScale) * volumeDelta;
+
+	// Write new state to the HeightMap
+	CURRENT_SAMPLE(HeightMap) = state;
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+	//assign PhysIKA data to texture
+	int index = (1024 - id.y - 1) * 1024 + id.x;
+	Result[id.xy] = float4(solid[index], depth[index] / 5.39715 * 7.0, uVel[index], wVel[index]);
+}

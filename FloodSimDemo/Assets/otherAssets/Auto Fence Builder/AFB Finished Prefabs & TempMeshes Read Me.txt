@@ -1,0 +1,4 @@
+Extra meshes are required if you have made a Finished fence that uses the procedurally generated "_Panel_Rail" type rails, and want to create a portable prefab from the 'Finished AutoFence' folder.
+
+Depending on your use, you may find a folder called 'TempMeshesForFinished' created.
+If you'd don't need to create standalone prefabs, you can safely delete the contents and sub-folders of the 'TempMeshesForFinished'.

@@ -55,7 +55,7 @@ Flood simulation with PhysIKA and Unity as backend
 
   ![avatar](./OperationPic/showDepth.png)
 
-* 键盘按下Y建可切换到比例尺视图（测试用），此时比例尺和地图1:1
+* 键盘按下Y建可切换到比例尺视图（测试用），此时比例尺和地图1:1，再按一次Y键取消
 
   ![avatar](./OperationPic/forTest.png)
 

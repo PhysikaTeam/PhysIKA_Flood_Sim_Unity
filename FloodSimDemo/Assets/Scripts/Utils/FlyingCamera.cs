@@ -43,6 +43,8 @@ namespace Assets.Scripts.Utils
                 {
                     isScaleVisible = false;
                     scaleRulers.SetActive(false);
+                    transform.position = new Vector3(2064.1f, 189.45f, 5789.5f);
+                    transform.eulerAngles = new Vector3(17.055f, 143.32f, 0f);
                 }
             }
 

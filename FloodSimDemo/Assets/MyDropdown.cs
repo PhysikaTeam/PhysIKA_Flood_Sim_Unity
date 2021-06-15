@@ -12,7 +12,7 @@ public class MyDropdown : Dropdown
 
     public new void Show()
     {
-        Debug.Log("in show");
+        //Debug.Log("in show");
         base.Show();
         Transform toggleRoot = transform.Find("Dropdown List/Viewport/Content");
         Toggle[] toggleList = toggleRoot.GetComponentsInChildren<Toggle>(false);
@@ -22,23 +22,23 @@ public class MyDropdown : Dropdown
             Toggle temp = toggleList[i];
             temp.onValueChanged.RemoveAllListeners();
             temp.isOn = ((1 << i) & SelectIndexBitMark) > 0; // 改造后
-            if (temp.isOn == false)
+            /*if (temp.isOn == false)
             {
              
                 Debug.Log("index false");
             }
-            else Debug.Log("index true");
+            else Debug.Log("index true");*/
             temp.onValueChanged.AddListener(x => OnSelectItemEx(temp));
             
         }
-        Debug.Log("out show");
+        //Debug.Log("out show");
     }
 
 
     public override void OnPointerClick(PointerEventData eventData)
     {
         Show();
-        Debug.Log("OnPointerClick");
+        //Debug.Log("OnPointerClick");
     }
 
 
@@ -71,8 +71,8 @@ public class MyDropdown : Dropdown
 
     public void OnSelectItemEx(Toggle toggle)
     {
-        Debug.Log("in listener");
-        Debug.Log(toggle.GetComponentInChildren<Text>().text);
+        /*Debug.Log("in listener");
+        Debug.Log(toggle.GetComponentInChildren<Text>().text);*/
         
         if (!toggle.isOn)
         {
@@ -127,6 +127,6 @@ public class MyDropdown : Dropdown
         
         SelectIndexBitMark ^= 1 << value;
         Hide();
-        Debug.Log("out listener");
+        //Debug.Log("out listener");
     }
 }

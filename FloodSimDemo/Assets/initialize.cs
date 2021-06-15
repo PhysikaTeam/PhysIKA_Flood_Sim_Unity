@@ -39,10 +39,19 @@ public class initialize : MonoBehaviour
         String yString = yInput.text.ToString();
         String w = wInput.text.ToString();
         String v = vInput.text.ToString();
-        int.TryParse(xString, out xRes);
-        int.TryParse(yString, out yRes);
-        waterHeight = Convert.ToSingle(w);
-        waterVelocity = Convert.ToSingle(v);
+        //Debug.Log(xString + " " + yString + " " + w + " " + v);
+        if (xString.Equals(""))
+            xRes = 1024;
+        else int.TryParse(xString, out xRes);
+        if (yString.Equals(""))
+            yRes = 1024;
+        else int.TryParse(yString, out yRes);
+        if (w.Equals(""))
+            waterHeight = 7.0f;
+        else waterHeight = Convert.ToSingle(w);
+        if (v.Equals(""))
+            waterVelocity = 5.0f;
+        else waterVelocity = Convert.ToSingle(v);
         CustomTerrain.width = xRes;
         CustomTerrain.height = yRes;
         CustomTerrain.riverHeight = waterHeight;
@@ -52,7 +61,7 @@ public class initialize : MonoBehaviour
 
         initPanel.SetActive(false);
 
-        Debug.Log("(" + xRes + ", " + yRes + ")");
-        Debug.Log("height: " + waterHeight + " speed: " + waterVelocity);
+        /*Debug.Log("(" + xRes + ", " + yRes + ")");
+        Debug.Log("height: " + waterHeight + " speed: " + waterVelocity);*/
     }
 }

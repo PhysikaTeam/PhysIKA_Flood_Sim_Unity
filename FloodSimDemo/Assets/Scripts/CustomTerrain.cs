@@ -1,14 +1,9 @@
 ﻿using System;
 using Assets.Scripts.Utils;
 using UnityEngine;
-using System.IO;
-using UnityEditor;
 using System.Collections.Generic;
-using UnityEngine.SceneManagement;
 using ChartAndGraph;
 using System.Runtime.InteropServices;
-//using XCharts;
-
 
 namespace Assets.Scripts
 {
@@ -49,7 +44,7 @@ namespace Assets.Scripts
         private float[] uVelRes = new float[len];
         private float[] wVelRes = new float[len];
 
-        public Material phyMat; //test PhysIKA material
+        public Material phyMat; 
         private RenderTexture _pRTex;
 
         //PhysIKA compute shader buffer
@@ -278,12 +273,14 @@ namespace Assets.Scripts
 
         void Start()
         {
+            PhysIKAInit();
             Camera.main.depthTextureMode = DepthTextureMode.Depth;
             // Set skybox
             string skyBoxName = "skybox/Blue Lagoon";
             skybox = Resources.Load<Material>(skyBoxName);
             RenderSettings.skybox = skybox;
-            PhysIKAInit();
+            
+
         }
         
         void Update()
@@ -295,11 +292,11 @@ namespace Assets.Scripts
                 Initialize();
                 firstClick = true;
             }
-
             rBuffer.SetData(solidRes);
             gBuffer.SetData(depthRes);
             bBuffer.SetData(uVelRes);
             aBuffer.SetData(wVelRes);
+            //Debug.Log("go here");
             if (Input.GetMouseButtonDown(2))
                 stop = !stop;
             // Controls
@@ -448,7 +445,6 @@ namespace Assets.Scripts
             Marshal.Copy(pData.uVel, uVelRes, 0, len);
             Marshal.Copy(pData.wVel, wVelRes, 0, len);
             Marshal.FreeHGlobal(passPtr);
-            /**/
             
             // Compute dispatch
             if (ErosionComputeShader != null)
@@ -491,7 +487,7 @@ namespace Assets.Scripts
                             pos2.Clear();
                             uiDrawLines.complete = true;
                             buildBarrier2 = false;
-                            Debug.Log("UIDRAWLINES COMPLETE");
+                            //Debug.Log("UIDRAWLINES COMPLETE");
                         }
                         if (pos2.Count >= 2)
                         {
@@ -500,9 +496,9 @@ namespace Assets.Scripts
                             barrirSt = pos2[0];
                             barrirEd = pos2[1];
                             mouseClicked = true;
-                            Debug.Log("pos2.count: " + pos2.Count);
+                            /*Debug.Log("pos2.count: " + pos2.Count);
                             Debug.Log("st: " + barrirSt);
-                            Debug.Log("ed: " + barrirEd);
+                            Debug.Log("ed: " + barrirEd);*/
                             pos2.RemoveAt(0);
                         }
                         
@@ -515,8 +511,8 @@ namespace Assets.Scripts
 
                     ErosionComputeShader.SetVector("_InputControls", _inputControls);
                     ErosionComputeShader.SetInt("_InputMode", (int)InputMode);
-                    if(mouseClicked)
-                        Debug.Log("ErosionCompute: " + (int)InputMode);
+                    /*if(mouseClicked)
+                        Debug.Log("ErosionCompute: " + (int)InputMode);*/
                     ErosionComputeShader.SetBool("_mouseClicked", mouseClicked);
                     ErosionComputeShader.SetBool("_earlyWarning", earlyWarning);
                     ErosionComputeShader.SetFloat("_InOutFlowScale", InOutFlowScale);
@@ -524,7 +520,8 @@ namespace Assets.Scripts
                 //float t = Time.fixedDeltaTime * Settings.TimeScale;
                 if (stop == true) //暂停时只有负责交互的核函数运行
                 {
-                    ErosionComputeShader.Dispatch(_kernels[0], _stateTexture.width / (int)_threadsPerGroupX, _stateTexture.height / (int)_threadsPerGroupY, 1);
+                    if(_kernels != null)
+                        ErosionComputeShader.Dispatch(_kernels[0], _stateTexture.width / (int)_threadsPerGroupX, _stateTexture.height / (int)_threadsPerGroupY, 1);
                 }
                 else
                 {
@@ -536,7 +533,7 @@ namespace Assets.Scripts
                             ErosionComputeShader.Dispatch(kernel, _stateTexture.width / (int)_threadsPerGroupX, _stateTexture.height / (int)_threadsPerGroupY, 1);
                         }
                     }
-                    ErosionComputeShader.Dispatch(phyKernel, 1024 / (int)_threadsPerGroupX, 1024 / (int)_threadsPerGroupY, 1);
+                    //ErosionComputeShader.Dispatch(phyKernel, 1024 / (int)_threadsPerGroupX, 1024 / (int)_threadsPerGroupY, 1);
                     frames++;
                     if(frames % Settings.framesGap == 0)
                     {
@@ -548,7 +545,7 @@ namespace Assets.Scripts
                             //save BuildingState, for the curve
                             if (frames > tmp)
                             {
-                                Debug.Log("building state is save");
+                                //Debug.Log("building state is save");
                                 saveBuildingState();
                             }
                         }
@@ -559,8 +556,8 @@ namespace Assets.Scripts
         }
         private void getSplineWaterOfBuilding(int _Index)
         {
-            Debug.Log("Building " + _Index);
-            Debug.Log("buildingStates.size(): " + buildingStates.Count);
+            /*Debug.Log("Building " + _Index);
+            Debug.Log("buildingStates.size(): " + buildingStates.Count);*/
             List<float> l = new List<float>();
             _Index = _Index - 1;
             int a =  (_Index % Width) ;
@@ -568,8 +565,8 @@ namespace Assets.Scripts
             foreach (var png in buildingStates)
             {
                 float depth=png.GetPixel(a, Width - 1 - b).r;
-                Debug.Log("a and b: "+ a + ", " + b);
-                Debug.Log("The depth: " + depth);
+                /*Debug.Log("a and b: "+ a + ", " + b);
+                Debug.Log("The depth: " + depth);*/
 
                 l.Add(depth);
             }
@@ -589,7 +586,7 @@ namespace Assets.Scripts
             png.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
             RenderTexture.active = prev;
             states.Add(png);
-            Debug.Log(states.Count);
+            //Debug.Log(states.Count);
         }
         private void backward(int index)
         {
@@ -621,7 +618,7 @@ namespace Assets.Scripts
             png.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
             buildingStates.Add(png);
             RenderTexture.active = prev;
-            Debug.Log(buildingStates.Count);
+            //Debug.Log(buildingStates.Count);
         }
 
         [ContextMenu("Initialize")]
@@ -629,7 +626,7 @@ namespace Assets.Scripts
         {
             /* ========= Setup computation =========== */
             // If there are already existing textures - release them
-            Debug.Log("Start Initialize");
+            //Debug.Log("Start Initialize");
 
             if (_stateTexture != null)
                 _stateTexture.Release();
@@ -640,7 +637,7 @@ namespace Assets.Scripts
             if (_velocityTexture != null)
                 _velocityTexture.Release();
 
-            Debug.Log("the init w and h is " + Width + "  " + Height);
+            //Debug.Log("the init w and h is " + Width + "  " + Height);
             // Initialize texture for storing height map
             _stateTexture = new RenderTexture(Width, Height, 0, RenderTextureFormat.ARGBFloat)
             {
@@ -811,7 +808,7 @@ namespace Assets.Scripts
                 }
                 //PhysIKA Compute Shader initialize
                 phyKernel = ErosionComputeShader.FindKernel("CSMain");
-                Debug.Log("The kernel is " + phyKernel);
+                //Debug.Log("The kernel is " + phyKernel);
                 ErosionComputeShader.SetBuffer(phyKernel, "solid", rBuffer);
                 ErosionComputeShader.SetBuffer(phyKernel, "depth", gBuffer);
                 ErosionComputeShader.SetBuffer(phyKernel, "uVel", bBuffer);
@@ -825,14 +822,14 @@ namespace Assets.Scripts
             }
 
             // Debug information
-            Debugger.Instance.Display("BuildingColorMap", _BuildingColorTexture);
+            /*Debugger.Instance.Display("BuildingColorMap", _BuildingColorTexture);
             Debugger.Instance.Display("BuildingOutlineMap", _BuildingOutlineTexture);
             Debugger.Instance.Display("Width", Width);
             Debugger.Instance.Display("Height", Height);
             Debugger.Instance.Display("HeightMap", _stateTexture);
             Debugger.Instance.Display("FluxMap", _waterFluxTexture);
             Debugger.Instance.Display("TerrainFluxMap", _terrainFluxTexture);
-            Debugger.Instance.Display("VelocityMap", _velocityTexture);
+            Debugger.Instance.Display("VelocityMap", _velocityTexture);*/
             /* ========= Setup Rendering =========== */
             // Assign state texture to materials, including physIKA into it 
             foreach (var material in Materials)
@@ -840,7 +837,7 @@ namespace Assets.Scripts
                 //Debug.Log(material.name);
                 if (material.name == "WaterTessWithWave")
                 {
-                    Debug.Log("PhysIKA, go let's go");
+                    //Debug.Log("PhysIKA, go let's go");
                     material.SetTexture("_StateTex", _pRTex);
                 }
                 if (material.name == "Water")
@@ -864,10 +861,12 @@ namespace Assets.Scripts
 
               
             }
+            
             phyMat.SetTexture("_ShowTex", _pRTex); // for test PhysIKA
             if (barrirShader != null)
                 barrirShader.SetTexture("_StateTex", _BuildingsAndProtectionTexture);
             addBuildingColorMaterial(); //测试丰富细节
+            
         }
 
         public void addBuildingColorMaterial()
@@ -885,7 +884,7 @@ namespace Assets.Scripts
                     else
                         tt = obj.name.Substring(9, space - 9);
                     int t = Convert.ToInt32(tt);
-                    Material m = new Material( Shader.Find("Custom/buildingColor"));
+                    Material m = new Material(Shader.Find("Custom/buildingColor"));
                     m.SetInt("_Index", t);
                     m.SetTexture(StateTextureKey, _BuildingColorTexture);
                     m.SetTexture("_MainTex", _BuildingOutlineTexture);

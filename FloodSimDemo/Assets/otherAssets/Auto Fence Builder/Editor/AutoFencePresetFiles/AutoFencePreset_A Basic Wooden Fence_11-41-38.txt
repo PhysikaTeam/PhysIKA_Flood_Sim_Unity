@@ -1,0 +1,1 @@
+A Basic Wooden FenceWoodenPicket_PostDarkDirtyWood_Panel_RailWoodenPicket_Post2.0000.000(1.000, 1.000, 1.000)(0.000, 0.000, 0.000)10.381(0.000, 0.410, 0.000)(1.000, 1.600, 1.000)(0.000, 0.000, 0.000)False13.840(0.000, 0.000, 0.000)(1.000, 0.690, 1.000)(0.000, 0.000, 0.000)False1.0000.0661.571FalseTrue4False0.0006False0.0004.5000.350

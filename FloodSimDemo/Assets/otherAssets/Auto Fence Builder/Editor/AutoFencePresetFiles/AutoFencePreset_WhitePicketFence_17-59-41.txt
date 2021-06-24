@@ -1,0 +1,1 @@
+WhitePicketFence2Picket_PostPicket_RailPicketSub_Post1.2000.000(1.000, 1.000, 1.000)(0.000, 90.000, 0.000)20.469(0.000, 0.165, 0.000)(1.000, 1.000, 1.000)(0.000, 0.000, 0.000)True10.200(0.000, 0.000, 0.000)(0.800, 0.800, 0.800)(0.000, 0.000, 0.000)False1.0000.2501.571FalseTrue2False0.00025False0.0004.5000.350DirtyWhiteDirtyWhiteDirtyWhite

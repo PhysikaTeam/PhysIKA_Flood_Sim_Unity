@@ -1,1 +1,0 @@
-BlackRoadsideAClassicRoadsideBox_PostTwoPlusOne_Panel_RailClassicRoadsideBox_Post1.4000.000(1.300, 1.000, 1.000)(0.000, 90.000, 0.000)10.683(0.000, 0.300, 0.000)(1.000, 2.100, 1.000)(0.000, 0.000, 0.000)True10.200(0.000, 0.220, 0.000)(0.700, 0.660, 1.000)(0.000, 0.000, 0.000)False1.0000.2501.571FalseTrue2False0.0006False0.0004.5000.350

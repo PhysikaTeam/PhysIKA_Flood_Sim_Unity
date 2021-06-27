@@ -93,6 +93,7 @@ Shader "Custom/reslution"
 			uniform float _gridWidth;
 			uniform float _axesXWidth;
 			uniform float _axesYWidth;
+			int _Display;
 
 			struct appdata
 			{
@@ -114,6 +115,9 @@ Shader "Custom/reslution"
 
 			fixed4 frag(v2f i) :SV_Target
 			{
+				if(_Display == 1)
+					return fixed4(1, 1, 1, 1);
+					
 				//将坐标的中心从左下角移动到网格的中心
 				fixed2 r = 2.0 * fixed2(i.uv.x - 0.5,i.uv.y - 0.5);
 				fixed3 backgroundColor = _backgroundColor.xyz;

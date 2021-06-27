@@ -606,8 +606,8 @@
 
 			fixed4 getInterColor(float wh) {
 				fixed4 c;
-				fixed4 a = fixed4(1, 0.2, 0, 1);
-				fixed4 b = fixed4(1, 0.6, 0, 1);
+				fixed4 a = fixed4(1, 0.4, 0, 1);
+				fixed4 b = fixed4(1, 0.8, 0, 1);
 
 				/*fixed4 a = fixed4(1, 0.3, 0, 1);
 				fixed4 b = fixed4(0, 1, 0.5, 1);*/
@@ -768,53 +768,15 @@
 				base = float4(lerp(base.rgb, envColor, myangle * transp), 1.0);
 				//base = float4(lerp(base.rgb, envColor * max(0.4,1.5*(1 - 1.0f * WATER_HEIGHT(state) / 32)), myangle * transp), 1.0);
 				base.a = 1.0;
-				//return base;
-
-				//fixed4 c;
-				////c.a = saturate(clamp(depthDifference * _DepthDecay * 4, 0, 0.8) + 0.4 * saturate(depthDifference * _DepthDecay * 0.5));	
-				////c.rgb *= 1.4;
-				//c.r = 120.0 / 255;
-				//c.g = 152.0 / 255;
-				//c.b = 174.0 / 255;
-				////c.a = 1.0;
-				//c.a =interPlot(0.5,1.0,0,6, WATER_HEIGHT(state));
+			
 				if (_WaterMode == 2)
 				{
 					//c.rgb = depthDifference;
 					fixed4 c;
-			/*						float tmp=1.0f*WATER_HEIGHT(state)/6;
-									if (tmp < 0.0001)
-										discard;
-									tmp = max(tmp, 0.2);
-									c = fixed4(0, 0, 1, tmp);*/
 					c = getInterColor(WATER_HEIGHT(state));
 									return c;
 				}
-				//else 
-				//{
-				//	fixed4 c;
-				//	/*float tmp = 1.0f * (i.vertex2.y-2) / 6;
-				//	if (tmp < 0.0001)
-				//		discard;
-				//	tmp = max(tmp, 0.2);
-				//	c = fixed4(0, 0, 1, tmp);*/
-
-
-				//	c = getInterColor(i.vertex2.y);
-				//	//
-				//	/*else if (tmp < 0.25)
-				//		c = fixed4(0.0, 0.0, 1.0, 1.0);
-				//	else if (tmp < 0.50)
-				//		c = fixed4(0.0, 1.0, 0.0, 1.0);
-				//	else if (tmp < 0.75)
-				//		c = fixed4(0.7, 0, 0, 1.0);
-				//	else
-				//		c= fixed4(1.0, 0.0, 0.0, 1.0);*/
-				//	return c;
-				//}
-				
 				return base;
-			//	return c;
 			}
 			ENDCG
 		}

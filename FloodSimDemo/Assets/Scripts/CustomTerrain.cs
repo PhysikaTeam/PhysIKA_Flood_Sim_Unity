@@ -261,6 +261,11 @@ namespace Assets.Scripts
         public static bool earlyWarning;
         public  Material waterShader,terrainShader,barrirShader;
         public static bool displayBuilding = true, displayTerrain = true, displayWater = true, displayMap = false;
+        public static bool displayGoogleMap = false;
+
+        private Shader shader1;
+        private Shader shader2;
+
         public static bool displayWaterDepth = false;
         public static bool backwardButtonIsClick = false;
         public static bool saveButtonClick = false;
@@ -279,8 +284,8 @@ namespace Assets.Scripts
             string skyBoxName = "skybox/Blue Lagoon";
             skybox = Resources.Load<Material>(skyBoxName);
             RenderSettings.skybox = skybox;
-            
-
+            shader1 = Shader.Find("Custom/reslution");
+            shader2 = Shader.Find("Custom/roadNet");
         }
         
         void Update()
@@ -346,6 +351,15 @@ namespace Assets.Scripts
             else
                 terrainShader.SetInt("_Display", 1);
 
+            if(displayGoogleMap == true)
+            {
+                terrainShader.shader = shader2;
+                terrainShader.SetInt("_Display", 1);
+            }
+            else
+            {
+                terrainShader.shader = shader1;
+            }
 
             if (Input.GetMouseButtonDown(0) && InputMode == InputModes.ClickBuildingToGetSpline)
             {

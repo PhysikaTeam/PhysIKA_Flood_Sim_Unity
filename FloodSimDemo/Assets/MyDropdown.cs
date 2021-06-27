@@ -9,7 +9,7 @@ public class MyDropdown : Dropdown
 {
     public bool AlwaysCallback = false;//是否开启 点击选项按钮总是回调
     public int SelectIndexBitMark = 0;
-
+    
     public new void Show()
     {
         //Debug.Log("in show");
@@ -85,9 +85,13 @@ public class MyDropdown : Dropdown
             {
                 CustomTerrain.displayWaterDepth = false;
             }
-            else if(toggle.GetComponentInChildren<Text>().text == "显示地图")
+            else if (toggle.GetComponentInChildren<Text>().text == "取消网格显示")
             {
                 CustomTerrain.displayMap = false;
+            }
+            else if (toggle.GetComponentInChildren<Text>().text == "显示地图")
+            {
+                CustomTerrain.displayGoogleMap = false;
             }
             return;
         }
@@ -100,9 +104,13 @@ public class MyDropdown : Dropdown
             {
                 CustomTerrain.displayWaterDepth = true;
             }
-            else if (toggle.GetComponentInChildren<Text>().text == "显示地图")
+            else if (toggle.GetComponentInChildren<Text>().text == "取消网格显示")
             {
                 CustomTerrain.displayMap = true;
+            }
+            else if (toggle.GetComponentInChildren<Text>().text == "显示地图")
+            {
+                CustomTerrain.displayGoogleMap = true;
             }
         }
        

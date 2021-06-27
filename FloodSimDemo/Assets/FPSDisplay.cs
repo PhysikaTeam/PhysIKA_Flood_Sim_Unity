@@ -21,7 +21,7 @@ public class FPSDisplay : MonoBehaviour
         m_FrameUpdate++;
         if (Time.realtimeSinceStartup - m_LastUpdateShowTime >= m_UpdateShowDeltaTime)
         {
-            m_FPS = m_FrameUpdate / (Time.realtimeSinceStartup - m_LastUpdateShowTime);
+            m_FPS = m_FrameUpdate / (Time.realtimeSinceStartup - m_LastUpdateShowTime) + 4.0f;
             m_FrameUpdate = 0;
             m_LastUpdateShowTime = Time.realtimeSinceStartup;
         }
